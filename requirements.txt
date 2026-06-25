@@ -1,0 +1,9 @@
+# Morris (C port) has NO required third-party dependencies for the default
+# `cli` backend: it shells out to the `claude` CLI and uses only the stdlib.
+#
+# The optional `api` backend (--backend api) needs the Anthropic SDK. Install
+# it explicitly when you want to use ANTHROPIC_API_KEY instead of the CLI:
+#
+#     pip install anthropic
+#
+# anthropic>=0.40

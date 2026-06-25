@@ -1,0 +1,25 @@
+Morris Minor (Morris embedded C port)
+Copyright 2026 Stig Manning
+
+This product is a derivative work of:
+
+    Morris — AI-Powered Mutation Testing for Rust
+    Copyright Marc Brooker
+    https://github.com/marcbrooker/morris
+
+The original Morris is licensed under the Apache License, Version 2.0, and
+Morris Minor is distributed under the same license. A copy of the license is
+provided in the LICENSE file.
+
+Modifications made in this derivative work:
+  - Ported from Rust to Python (single file, standard library only for the
+    default backend).
+  - Retargeted from Rust/cargo to embedded C projects that expose a host-side
+    CMake + CTest unit suite (Unity). Build and test are run as separate
+    cmake/ctest steps, so a non-compiling mutation is reported as BUILD ERROR.
+  - Source discovery uses compile_commands.json (the modules actually compiled
+    into the tests) instead of globbing src/*.rs.
+  - The AWS Bedrock Converse client was replaced by two pluggable backends:
+    the local `claude` CLI (claude -p) and the Anthropic API (anthropic SDK).
+  - --auto mode inserts new Unity test functions and their RUN_TEST
+    registrations (instead of Rust #[test] functions).
