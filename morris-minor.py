@@ -13,7 +13,7 @@ A Python port of Marc Brooker's Morris (https://github.com/marcbrooker/morris),
 adapted from Rust/cargo to embedded C projects that expose a host-side
 CMake + CTest unit suite (e.g. Unity).
 
-Like the original, Morris follows a fixed, deterministic workflow. The AI (Claude)
+Like the original, Morris Minor follows a fixed, deterministic workflow. The AI (Claude)
 is consulted exactly twice: once to propose strategic single-line mutations, and
 once to analyse the survivors. Everything else -- file discovery, building,
 running tests, applying and restoring mutations -- is plain deterministic code.

@@ -2,6 +2,12 @@
 
 ### AI-Powered Mutation Testing for C firmware
 
+*Find the bugs hiding in your test suite*
+
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
+[![Claude](https://img.shields.io/badge/Claude-Sonnet%20%2F%20Haiku-8A2BE2.svg)](https://www.anthropic.com/claude)
+
 A Python port of [Marc Brooker's Morris](https://github.com/marcbrooker/morris),
 adapted from Rust/`cargo` to **embedded C projects with a host-side CMake + CTest
 unit suite** (e.g. [Unity](https://github.com/ThrowTheSwitch/Unity)). It works
@@ -9,13 +15,13 @@ with any project laid out that way — see *Project layout*.
 
 ```
 ┌─────────────┐      ┌──────────────┐      ┌─────────────┐
-│  Your C     │ ───> │    Morris    │ ───> │  Test Gaps  │
+│  Your C     │ ───> │ Morris Minor │ ───> │  Test Gaps  │
 │  + Unity    │      │ (Fixed Flow) │      │  + Fixes    │
 │   tests     │      └──────────────┘      └─────────────┘
 └─────────────┘
 ```
 
-Like [the original](https://github.com/marcbrooker/morris), Morris follows a
+Like [the original](https://github.com/marcbrooker/morris), Morris Minor follows a
 **fixed, deterministic workflow**. The AI
 (Claude) is consulted exactly **twice** — once to propose mutations, once to
 analyse the survivors. All file discovery, building, test execution, and
@@ -51,20 +57,24 @@ optional `--auto` mode that writes and verifies new tests.
   *not* the firmware's cross-compiler — the host suite builds for your machine.
 - An AI backend (pick one):
   - **`cli`** *(default, no API key)* — the [`claude`](https://docs.claude.com/en/docs/claude-code)
-    CLI on `PATH`, signed in. Morris calls `claude -p`.
+    CLI on `PATH`, signed in. Morris Minor calls `claude -p`.
   - **`api`** — `pip install anthropic` and set `ANTHROPIC_API_KEY`.
 
 ---
 
 ## Quick start
 
-Point it at your firmware project root (the directory containing the test dir):
+Morris Minor is a single file — there's nothing to build or install. Copy
+`morris-minor.py` wherever you like and run it with Python 3.10+ (the default
+`cli` backend needs no extra packages; the `api` backend wants
+`pip install anthropic`). Point it at your firmware project root (the directory
+containing the test dir):
 
 ```bash
 python morris-minor.py --project path/to/firmware
 ```
 
-That's it. Morris configures the test build, runs the baseline, asks Claude for
+That's it. Morris Minor configures the test build, runs the baseline, asks Claude for
 5–8 strategic mutations, tries each one, and reports what survived.
 
 ### Example run
@@ -75,15 +85,15 @@ That's it. Morris configures the test build, runs the baseline, asks Claude for
 ⏱️  Configuring + running baseline tests...
    ✅ Baseline passed in 0.1s (mutation timeout: 30.0s)
 📁 Discovering source files...
-   Core/IO/wav.c
-   Core/Music/arp.c
+   Core/dsp/filter.c
+   Core/util/ringbuf.c
 🧬 Asking AI for mutation plan...
    Got 4 mutations
 🧪 Testing mutations...
-   [1/4] Core/Music/arp.c:57 - Change >= 1 to > 1 in UPDOWN descent... ✅ KILLED
-   [2/4] Core/IO/wav.c:54 - Change (csz & 1) to (csz & 0)...           ✅ KILLED
-   [3/4] Core/Music/arp.c:123 - Change >= 0 to > 0 on clock firing... ✅ KILLED
-   [4/4] Core/Music/arp.c:86 - Halve the derived gate duration...      ✅ KILLED
+   [1/4] Core/util/ringbuf.c:42 - Change >= to > in the full check...   ✅ KILLED
+   [2/4] Core/dsp/filter.c:88 - Change + to - in the accumulator...     ✅ KILLED
+   [3/4] Core/util/ringbuf.c:57 - Off-by-one: head+1 -> head on wrap... ✅ KILLED
+   [4/4] Core/dsp/filter.c:31 - Change <= to < on the tap loop...       ✅ KILLED
 
 📊 Results: 4 killed, 0 survived out of 4 testable mutations
 
@@ -118,7 +128,7 @@ CLI.
 python morris-minor.py --project path/to/firmware
 
 # Only mutate one module, quick model
-python morris-minor.py --project path/to/firmware --quick Core/Music/arp.c
+python morris-minor.py --project path/to/firmware --quick Core/dsp/filter.c
 
 # Hands-free: auto-write tests that kill the survivors, then verify
 python morris-minor.py --project path/to/firmware --auto
@@ -145,7 +155,7 @@ ANTHROPIC_API_KEY=sk-... python morris-minor.py --project path/to/firmware --bac
 6. **Analysis** *(AI call #2, only if something survived)* — explains why each
    survivor slips through and shows a Unity test that would catch it.
 7. **Auto mode** *(optional)* — Claude returns new Unity test functions + their
-   `RUN_TEST` registrations as JSON; Morris inserts each function before
+   `RUN_TEST` registrations as JSON; Morris Minor inserts each function before
    `main()` and its runner after `UNITY_BEGIN()`, rebuilds, and runs the suite.
    If the build or tests fail, every touched file is reverted.
 
@@ -156,18 +166,18 @@ ANTHROPIC_API_KEY=sk-... python morris-minor.py --project path/to/firmware --bac
 ```
 <project>/                 # your firmware project root  (--project)
 ├── Core/                  # modules under test         (--source-root)
-│   ├── Music/arp.c
-│   └── IO/wav.c
+│   ├── dsp/filter.c
+│   └── util/ringbuf.c
 └── test/                  # host CMake test project    (--test-dir)
     ├── CMakeLists.txt      #   enable_testing(); add_test(...)
     ├── unity/              #   vendored Unity
-    ├── test_arp.c          #   main() with UNITY_BEGIN()/RUN_TEST/UNITY_END()
-    ├── test_wav.c
-    └── build/              #   generated by Morris      (--build-dir)
+    ├── test_filter.c       #   main() with UNITY_BEGIN()/RUN_TEST/UNITY_END()
+    ├── test_ringbuf.c
+    └── build/              #   generated by Morris Minor (--build-dir)
 ```
 
 All four path flags are relative to `--project`: `--source-root` (`Core`),
-`--test-dir` (`test`), and `--build-dir` (defaults to `test/build`, where Morris
+`--test-dir` (`test`), and `--build-dir` (defaults to `test/build`, where Morris Minor
 writes the CMake build and reads `compile_commands.json` for discovery).
 
 `--auto` relies on each `test_*.c` having the standard Unity `main()` shape
@@ -177,15 +187,15 @@ writes the CMake build and reads `compile_commands.json` for discovery).
 
 ## Notes for STM32 / embedded C projects
 
-- **It only mutates host-buildable logic.** Morris mutates exactly the `.c`
+- **It only mutates host-buildable logic.** Morris Minor mutates exactly the `.c`
   files your `test/` build compiles (it reads them from
   `compile_commands.json`). On a typical STM32CubeMX project that's the portable
-  logic you've factored out — here `Core/Music/arp.c` and `Core/IO/wav.c`. HAL,
+  logic you've factored out — e.g. `Core/dsp/filter.c`, `Core/util/ringbuf.c`. HAL,
   peripheral drivers, `main.c`, `Drivers/`, `Middlewares/`, and the USB stack
   aren't in the host build, so they're skipped automatically. To widen coverage,
   extract more hardware-independent modules and add them to `test/CMakeLists.txt`
-  — with stubs for their hardware surface (e.g. a fake FatFs so a WAV parser can
-  be tested against an in-memory file).
+  — with stubs for their hardware surface (e.g. a fake filesystem layer so a
+  file-parsing module can run against an in-memory buffer).
 
 - **Host compiler, not the ARM cross-compiler.** The host suite builds for *your*
   machine, so you need native `gcc`/`clang`/MSVC — **not** `arm-none-eabi-gcc`.
@@ -193,9 +203,9 @@ writes the CMake build and reads `compile_commands.json` for discovery).
 - **`--source-root Core` matches the CubeMX convention** (application code under
   `Core/`). Override it if your project keeps its logic elsewhere.
 
-- **It mirrors your CI.** Morris runs the same
+- **It mirrors your CI.** Morris Minor runs the same
   `cmake -S test -B test/build -G Ninja` → `cmake --build` → `ctest` sequence a
-  typical host-test CI job uses, so a clean Morris run reproduces CI locally
+  typical host-test CI job uses, so a clean Morris Minor run reproduces CI locally
   before you push.
 
 - **Deterministic tests only.** Mutation testing assumes repeatable pass/fail.
@@ -203,9 +213,34 @@ writes the CMake build and reads `compile_commands.json` for discovery).
   (e.g. "the output stays within the expected set") rather than an exact value,
   so a mutant isn't flagged inconsistently between runs.
 
-- **Host-side, not on-target.** Morris exercises the host unit tests on your
+- **Host-side, not on-target.** Morris Minor exercises the host unit tests on your
   machine. It does not build, flash, or test on the MCU — on-target/hardware
   testing is out of scope.
+
+---
+
+## Morris Minor vs exhaustive mutation testing
+
+Tools like [Mull](https://github.com/mull-project/mull) (LLVM-IR based) and
+[Dextool mutate](https://github.com/joakim-brannstrom/dextool) do *exhaustive*
+mutation testing for C/C++:
+
+- Systematically generate every mutation — often hundreds to thousands
+- Work at the AST / LLVM-IR level
+- Produce comprehensive mutation-score reports
+- Best for: CI gates and full audits
+
+Morris Minor takes the **AI-guided** approach instead:
+
+- Fixed workflow; the AI only selects ~5–8 strategic mutations and explains the
+  survivors (it never drives the build or files)
+- Source-level, single-line edits rebuilt with your existing CMake/CTest
+- Contextual, actionable explanations — plus optional `--auto` test writing
+- Best for: interactive development, learning, and a fast "where are my test
+  gaps?" pass
+
+The exhaustive tools are more mature and thorough — reach for them when you want
+a complete audit. Morris Minor is the quick, conversational complement.
 
 ---
 
