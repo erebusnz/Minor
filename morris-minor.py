@@ -430,7 +430,9 @@ class CliBackend(Backend):
 class ApiBackend(Backend):
     """Calls the Anthropic API via the ``anthropic`` SDK."""
 
-    def __init__(self, model: str, max_tokens: int = 8192):
+    def __init__(
+        self, model: str, max_tokens: int = 8192, temperature: float = 1.0
+    ):
         try:
             import anthropic  # noqa: F401
         except ImportError as e:
@@ -443,12 +445,14 @@ class ApiBackend(Backend):
         self._anthropic = anthropic
         self.model = model  # full model id
         self.max_tokens = max_tokens
+        self.temperature = temperature
         self.client = anthropic.Anthropic()
 
     def converse(self, system: str, user: str) -> str:
         resp = self.client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
+            temperature=self.temperature,
             system=system,
             messages=[{"role": "user", "content": user}],
         )
@@ -465,13 +469,19 @@ def model_for(backend: str, quick: bool) -> str:
     return "claude-haiku-4-5-20251001" if quick else "claude-sonnet-4-6"
 
 
-def make_backend(name: str, quick: bool) -> Backend:
+def make_backend(name: str, quick: bool, temperature: float = 1.0) -> Backend:
     if name == "auto":
         name = "api" if os.environ.get("ANTHROPIC_API_KEY") else "cli"
     if name == "cli":
+        if temperature != 1.0:
+            print(
+                "⚠️  --temperature only affects the api backend; the claude CLI "
+                "ignores it.",
+                file=sys.stderr,
+            )
         return CliBackend(model_for("cli", quick))
     if name == "api":
-        return ApiBackend(model_for("api", quick))
+        return ApiBackend(model_for("api", quick), temperature=temperature)
     raise ValueError(f"unknown backend: {name}")
 
 
@@ -482,15 +492,21 @@ def make_backend(name: str, quick: bool) -> Backend:
 
 def build_mutation_prompt(file_contents: str, mutation_count: str) -> str:
     return (
-        f"Analyze this C firmware project and propose {mutation_count} strategic "
-        "single-line mutations that are likely to SURVIVE the existing test suite "
-        "(i.e. reveal test coverage gaps).\n\n"
-        "Focus on:\n"
-        "- Boundary conditions (>, <, >=, <=)\n"
-        "- Arithmetic operators (+, -, *, /, %)\n"
-        "- Logic / bitwise operators (&&, ||, !, ==, !=, &, |)\n"
-        "- Off-by-one errors and loop bounds\n"
-        "- Constant and return-value changes\n\n"
+        f"Analyze these host-testable C firmware modules and propose "
+        f"{mutation_count} single-line mutations that change observable behavior "
+        "but could slip past the existing tests -- revealing real coverage gaps.\n\n"
+        "This is embedded firmware, so look beyond relational operators to the "
+        "bit-level and width-sensitive code where subtle bugs hide:\n"
+        "- Bit-shifts and shift amounts (<<, >>), masks and bit positions "
+        "(&, |, ^, ~), compound assignments (+=, |=, &=, ^=)\n"
+        "- Integer width and overflow (casts that guard wraparound, literal suffixes)\n"
+        "- Boundaries (>, <, >=, <=), arithmetic (+, -, *, /, %), off-by-one and loop bounds\n"
+        "- Algorithmic constants and return values -- not hardware register or "
+        "bit-position magic numbers\n\n"
+        "Don't propose mutations no host test could kill: changes only to "
+        "nondeterministic internals (e.g. a PRNG whose tests assert a range, not an "
+        "exact value), to hardware values the host build stubs out (volatile, HAL_*, "
+        "ISR state), or that are equivalent to the original.\n\n"
         "Only mutate the project source files shown below (the modules under test), "
         "never the test harness itself. Each mutation must still compile as valid C.\n\n"
         "Respond with ONLY a JSON object (no markdown fences) in this exact format:\n"
@@ -728,12 +744,24 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         "-n", "--mutations", type=int, default=None,
         help="Number of mutations to request (default: 5-8).",
     )
+    p.add_argument(
+        "--temperature",
+        type=float,
+        default=1.0,
+        help="Sampling temperature for the AI calls, 0.0-1.0 (default: 1.0). "
+        "Lower values make mutation selection more repeatable but less varied "
+        "across re-runs; only the api backend honors it.",
+    )
     p.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
     return p.parse_args(argv)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
+
+    if not 0.0 <= args.temperature <= 1.0:
+        print("❌ --temperature must be between 0.0 and 1.0", file=sys.stderr)
+        return 1
 
     # Emit UTF-8 regardless of the console's default code page (Windows cp1252
     # would otherwise mangle or refuse the status emoji).
@@ -769,7 +797,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # Build the AI backend early so we fail fast on missing creds/tools.
     try:
-        backend = make_backend(args.backend, args.quick_mode)
+        backend = make_backend(args.backend, args.quick_mode, args.temperature)
     except RuntimeError as e:
         print(f"❌ {e}", file=sys.stderr)
         return 1

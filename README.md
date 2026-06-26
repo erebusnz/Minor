@@ -116,6 +116,7 @@ That's it. Morris Minor configures the test build, runs the baseline, asks Claud
 | `--auto` | Write & verify new Unity tests for survivors. |
 | `--quick` | Use the faster Haiku model. |
 | `-n, --mutations N` | Request exactly N mutations (default: 5–8). |
+| `--temperature T` | Sampling temperature for the AI calls, `0.0`–`1.0` (default: `1.0`). Lower = more repeatable but less varied mutation selection across re-runs. Only the `api` backend honors it. |
 | `-v, --verbose` | Print the CMake/CTest commands as they run. |
 
 `--backend auto` uses `api` if `ANTHROPIC_API_KEY` is set, otherwise the `claude`
