@@ -464,10 +464,18 @@ class ApiBackend(Backend):
 
 
 class OpenAiBackend(Backend):
-    """Calls the OpenAI API via the ``openai`` SDK."""
+    """Calls the OpenAI API via the ``openai`` SDK (Responses endpoint).
+
+    Uses ``responses.create`` rather than chat completions because the GPT-5 /
+    Codex models are served only on the Responses endpoint. ``instructions`` is
+    the system prompt and ``input`` the user message; ``output_text`` aggregates
+    the text parts. ``max_output_tokens`` bounds reasoning + output together, so
+    it is set generously to leave room for a reasoning model's hidden tokens
+    before it emits the answer.
+    """
 
     def __init__(
-        self, model: str, max_tokens: int = 8192, temperature: float = 1.0
+        self, model: str, max_output_tokens: int = 16384, temperature: float = 1.0
     ):
         try:
             import openai  # noqa: F401
@@ -479,25 +487,33 @@ class OpenAiBackend(Backend):
         if not os.environ.get("OPENAI_API_KEY"):
             raise RuntimeError("OPENAI_API_KEY is not set")
         self._openai = openai
-        self.model = model  # full model id, e.g. "gpt-4o"
-        self.max_tokens = max_tokens
+        self.model = model  # full model id, e.g. "gpt-5.3-codex"
+        self.max_output_tokens = max_output_tokens
         self.temperature = temperature
         self.client = openai.OpenAI()
 
     def converse(self, system: str, user: str) -> str:
-        resp = self.client.chat.completions.create(
+        kwargs = dict(
             model=self.model,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            instructions=system,
+            input=user,
+            max_output_tokens=self.max_output_tokens,
         )
-        content = resp.choices[0].message.content
-        if not content:
+        try:
+            resp = self.client.responses.create(
+                temperature=self.temperature, **kwargs
+            )
+        except self._openai.BadRequestError as e:
+            # Reasoning / Codex models reject a non-default temperature; the
+            # task still works without it, so drop it and retry rather than fail.
+            if "temperature" in str(e).lower():
+                resp = self.client.responses.create(**kwargs)
+            else:
+                raise
+        text = (resp.output_text or "").strip()
+        if not text:
             raise RuntimeError("no text in OpenAI response")
-        return content
+        return text
 
 
 # Model selection: (backend, quick) -> model identifier.
@@ -505,7 +521,7 @@ def model_for(backend: str, quick: bool) -> str:
     if backend == "cli":
         return "haiku" if quick else "sonnet"
     if backend == "openai":
-        return "gpt-4o-mini" if quick else "gpt-4o"
+        return "gpt-5-mini" if quick else "gpt-5.3-codex"
     return "claude-haiku-4-5-20251001" if quick else "claude-sonnet-4-6"
 
 

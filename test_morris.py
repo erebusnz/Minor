@@ -319,8 +319,8 @@ class TestModelSelection(unittest.TestCase):
         )
 
     def test_openai_models(self):
-        self.assertEqual(morris.model_for("openai", False), "gpt-4o")
-        self.assertEqual(morris.model_for("openai", True), "gpt-4o-mini")
+        self.assertEqual(morris.model_for("openai", False), "gpt-5.3-codex")
+        self.assertEqual(morris.model_for("openai", True), "gpt-5-mini")
 
 
 if __name__ == "__main__":
