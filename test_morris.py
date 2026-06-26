@@ -318,6 +318,10 @@ class TestModelSelection(unittest.TestCase):
             morris.model_for("api", True), "claude-haiku-4-5-20251001"
         )
 
+    def test_openai_models(self):
+        self.assertEqual(morris.model_for("openai", False), "gpt-4o")
+        self.assertEqual(morris.model_for("openai", True), "gpt-4o-mini")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

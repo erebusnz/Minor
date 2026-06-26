@@ -59,6 +59,7 @@ optional `--auto` mode that writes and verifies new tests.
   - **`cli`** *(default, no API key)* — the [`claude`](https://docs.claude.com/en/docs/claude-code)
     CLI on `PATH`, signed in. Morris Minor calls `claude -p`.
   - **`api`** — `pip install anthropic` and set `ANTHROPIC_API_KEY`.
+  - **`openai`** — `pip install openai` and set `OPENAI_API_KEY`.
 
 ---
 
@@ -112,15 +113,15 @@ That's it. Morris Minor configures the test build, runs the baseline, asks Claud
 | `--build-dir DIR` | CMake build dir, relative to project (default: `<test-dir>/build`). |
 | `--source-root DIR` | Subtree holding the modules under test, relative to project (default: `Core`). |
 | `--generator NAME` | CMake generator (default: `Ninja`). |
-| `--backend {auto,cli,api}` | AI backend (default: `auto`). |
+| `--backend {auto,cli,api,openai}` | AI backend (default: `auto`). `api` = Anthropic, `openai` = OpenAI. |
 | `--auto` | Write & verify new Unity tests for survivors. |
 | `--quick` | Use the faster Haiku model. |
 | `-n, --mutations N` | Request exactly N mutations (default: 5–8). |
-| `--temperature T` | Sampling temperature for the AI calls, `0.0`–`1.0` (default: `1.0`). Lower = more repeatable but less varied mutation selection across re-runs. Only the `api` backend honors it. |
+| `--temperature T` | Sampling temperature for the AI calls, `0.0`–`1.0` (default: `1.0`). Lower = more repeatable but less varied mutation selection across re-runs. Honored by the `api` and `openai` backends. |
 | `-v, --verbose` | Print the CMake/CTest commands as they run. |
 
-`--backend auto` uses `api` if `ANTHROPIC_API_KEY` is set, otherwise the `claude`
-CLI.
+`--backend auto` uses `api` (Anthropic) if `ANTHROPIC_API_KEY` is set, then
+`openai` if `OPENAI_API_KEY` is set, otherwise the `claude` CLI.
 
 ### Examples
 
@@ -136,6 +137,9 @@ python morris-minor.py --project path/to/firmware --auto
 
 # Force the Anthropic API backend
 ANTHROPIC_API_KEY=sk-... python morris-minor.py --project path/to/firmware --backend api
+
+# Use the OpenAI API backend
+OPENAI_API_KEY=sk-... python morris-minor.py --project path/to/firmware --backend openai
 ```
 
 ---

@@ -18,9 +18,10 @@ is consulted exactly twice: once to propose strategic single-line mutations, and
 once to analyse the survivors. Everything else -- file discovery, building,
 running tests, applying and restoring mutations -- is plain deterministic code.
 
-Two backends are supported for the AI calls:
+Three backends are supported for the AI calls:
   * ``cli`` -- shells out to the local ``claude`` CLI in print mode (no API key).
   * ``api`` -- uses the ``anthropic`` Python SDK and ``ANTHROPIC_API_KEY``.
+  * ``openai`` -- uses the ``openai`` Python SDK and ``OPENAI_API_KEY``.
 
 The C workflow differs from Rust in one structural way: build and test are
 separate commands, so a mutation that fails to compile is a BUILD ERROR, a
@@ -462,26 +463,72 @@ class ApiBackend(Backend):
         return "".join(parts)
 
 
+class OpenAiBackend(Backend):
+    """Calls the OpenAI API via the ``openai`` SDK."""
+
+    def __init__(
+        self, model: str, max_tokens: int = 8192, temperature: float = 1.0
+    ):
+        try:
+            import openai  # noqa: F401
+        except ImportError as e:
+            raise RuntimeError(
+                "the `openai` package is required for the openai backend "
+                "(pip install openai)"
+            ) from e
+        if not os.environ.get("OPENAI_API_KEY"):
+            raise RuntimeError("OPENAI_API_KEY is not set")
+        self._openai = openai
+        self.model = model  # full model id, e.g. "gpt-4o"
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self.client = openai.OpenAI()
+
+    def converse(self, system: str, user: str) -> str:
+        resp = self.client.chat.completions.create(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+        content = resp.choices[0].message.content
+        if not content:
+            raise RuntimeError("no text in OpenAI response")
+        return content
+
+
 # Model selection: (backend, quick) -> model identifier.
 def model_for(backend: str, quick: bool) -> str:
     if backend == "cli":
         return "haiku" if quick else "sonnet"
+    if backend == "openai":
+        return "gpt-4o-mini" if quick else "gpt-4o"
     return "claude-haiku-4-5-20251001" if quick else "claude-sonnet-4-6"
 
 
 def make_backend(name: str, quick: bool, temperature: float = 1.0) -> Backend:
     if name == "auto":
-        name = "api" if os.environ.get("ANTHROPIC_API_KEY") else "cli"
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            name = "api"
+        elif os.environ.get("OPENAI_API_KEY"):
+            name = "openai"
+        else:
+            name = "cli"
     if name == "cli":
         if temperature != 1.0:
             print(
-                "⚠️  --temperature only affects the api backend; the claude CLI "
-                "ignores it.",
+                "⚠️  --temperature only affects the api/openai backends; the "
+                "claude CLI ignores it.",
                 file=sys.stderr,
             )
         return CliBackend(model_for("cli", quick))
     if name == "api":
         return ApiBackend(model_for("api", quick), temperature=temperature)
+    if name == "openai":
+        return OpenAiBackend(model_for("openai", quick), temperature=temperature)
     raise ValueError(f"unknown backend: {name}")
 
 
@@ -810,9 +857,11 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--backend",
-        choices=["auto", "cli", "api"],
+        choices=["auto", "cli", "api", "openai"],
         default="auto",
-        help="AI backend: claude CLI, Anthropic API, or auto-detect (default: auto).",
+        help="AI backend: claude CLI, Anthropic API (api), OpenAI API (openai), "
+        "or auto-detect (default: auto). Auto prefers ANTHROPIC_API_KEY, then "
+        "OPENAI_API_KEY, else the claude CLI.",
     )
     p.add_argument(
         "--auto", dest="auto_mode", action="store_true",
@@ -832,7 +881,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         default=1.0,
         help="Sampling temperature for the AI calls, 0.0-1.0 (default: 1.0). "
         "Lower values make mutation selection more repeatable but less varied "
-        "across re-runs; only the api backend honors it.",
+        "across re-runs; honored by the api and openai backends.",
     )
     p.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
     return p.parse_args(argv)
