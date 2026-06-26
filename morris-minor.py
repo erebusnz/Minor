@@ -615,8 +615,43 @@ def insert_unity_tests(
     return "\n".join(out) + trailing
 
 
+def _verify_kills(
+    runner: Runner, project: Path, survivors: list[Mutation], timeout: float
+) -> list[Mutation]:
+    """Return the survivors the current test tree now KILLS (the mutant is the oracle).
+
+    The candidate test is already written into its file and the clean tree passes.
+    For each survivor, re-apply its mutation and check the suite now fails -- which,
+    since a survivor leaves the baseline green, means the new test caught it.
+    The source is always restored afterwards.
+    """
+    killed: list[Mutation] = []
+    for s in survivors:
+        sp = (project / s.file_path).resolve()
+        try:
+            sorig = sp.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        mtext, mismatch = apply_mutation_to_text(
+            sorig, s.line_number, s.original_line, s.mutated_line
+        )
+        if mismatch is not None:
+            continue
+        try:
+            sp.write_text(mtext, encoding="utf-8")
+            if runner.build_and_test(timeout)[0] == Outcome.KILLED:
+                killed.append(s)
+        finally:
+            sp.write_text(sorig, encoding="utf-8")
+    return killed
+
+
 def auto_apply(
-    project: Path, analysis: str, runner: Runner, timeout: float
+    project: Path,
+    analysis: str,
+    runner: Runner,
+    timeout: float,
+    survivors: list[Mutation],
 ) -> None:
     print("\n🔧 Auto-applying test improvements...", file=sys.stderr)
     try:
@@ -630,53 +665,100 @@ def auto_apply(
         print("   ⚠️  No test additions in AI response", file=sys.stderr)
         return
 
+    # Flatten to individual candidate tests so each can be verified in isolation.
+    candidates: list[tuple[str, str, str]] = []  # (test_file, function, runner_name)
+    for entry in additions:
+        test_file = entry.get("test_file")
+        functions = entry.get("functions", [])
+        runners = entry.get("runners", [])
+        if not test_file or not functions:
+            continue
+        for i, fn in enumerate(functions):
+            name = runners[i] if i < len(runners) else None
+            if name:
+                candidates.append((test_file, fn, name))
+
     backups: dict[Path, str] = {}
-    applied = 0
+    accepted = 0
+    remaining = list(survivors)  # survivors not yet covered by an accepted test
     try:
-        for entry in additions:
-            test_file = entry.get("test_file")
-            functions = entry.get("functions", [])
-            runners = entry.get("runners", [])
-            if not test_file or not functions:
-                continue
+        for test_file, fn, name in candidates:
             path = (project / test_file).resolve()
             if not path.exists():
                 print(f"   ⚠️  {test_file}: no such test file, skipping", file=sys.stderr)
                 continue
             if path not in backups:
                 backups[path] = path.read_text(encoding="utf-8")
-            patched = insert_unity_tests(backups[path], functions, runners)
+
+            # Insert on top of whatever has already been accepted in this file.
+            current = path.read_text(encoding="utf-8")
+            patched = insert_unity_tests(current, [fn], [name])
             if patched is None:
                 print(
                     f"   ⚠️  {test_file}: could not find main()/UNITY_BEGIN anchors",
                     file=sys.stderr,
                 )
                 continue
-            # Re-read current (may already have prior additions for same file).
-            current = path.read_text(encoding="utf-8")
-            patched = insert_unity_tests(current, functions, runners)
-            if patched is None:
-                continue
+
+            # Gate 1: the new test must compile and pass on clean source.
             path.write_text(patched, encoding="utf-8")
-            print(f"   Writing {test_file}...", file=sys.stderr)
-            applied += 1
+            outcome = runner.build_and_test(timeout)[0]
+            if outcome != Outcome.SURVIVED:
+                why = (
+                    "won't compile (e.g. duplicate name)"
+                    if outcome == Outcome.BUILD_ERROR
+                    else "fails on clean source"
+                )
+                print(f"   ✗ {name}: rejected ({why})", file=sys.stderr)
+                path.write_text(current, encoding="utf-8")
+                continue
 
-        if applied == 0:
-            print("   ⚠️  No test files were patched", file=sys.stderr)
+            # Gate 2: it must actually KILL an as-yet-uncovered survivor.
+            newly = _verify_kills(runner, project, remaining, timeout)
+            if not newly:
+                print(
+                    f"   ✗ {name}: rejected (kills no uncovered survivor)",
+                    file=sys.stderr,
+                )
+                path.write_text(current, encoding="utf-8")
+                continue
+
+            for s in newly:
+                remaining.remove(s)
+            accepted += 1
+            covered = ", ".join(f"{s.file_path}:{s.line_number}" for s in newly)
+            print(f"   ✓ {name}: kills {covered}", file=sys.stderr)
+
+        if accepted == 0:
+            for path, original in backups.items():
+                path.write_text(original, encoding="utf-8")
+            print(
+                "   ⚠️  No generated test verifiably killed a survivor; nothing kept.",
+                file=sys.stderr,
+            )
             return
 
-        print("   Verifying tests...", file=sys.stderr)
-        outcome, detail = runner.build_and_test(timeout)
-        if outcome == Outcome.SURVIVED:  # build ok + all tests pass
-            print("   ✅ All tests pass with improvements!", file=sys.stderr)
+        # Belt-and-suspenders: the accepted set must still pass all together.
+        if runner.build_and_test(timeout)[0] != Outcome.SURVIVED:
+            for path, original in backups.items():
+                path.write_text(original, encoding="utf-8")
+            print(
+                "   ❌ Accepted tests failed when combined; reverting all.",
+                file=sys.stderr,
+            )
             return
+
+        killed_n = len(survivors) - len(remaining)
         print(
-            f"   ❌ Tests/build failed after auto-apply ({outcome.value}); "
-            "reverting. Output:\n" + detail,
+            f"   ✅ Added {accepted} verified test(s), killing {killed_n} of "
+            f"{len(survivors)} survivor(s).",
             file=sys.stderr,
         )
-        for path, original in backups.items():
-            path.write_text(original, encoding="utf-8")
+        for s in remaining:
+            print(
+                f"   ℹ️  still unkilled: {s.file_path}:{s.line_number} {s.description}",
+                file=sys.stderr,
+            )
     except Exception:
         # On any error, restore everything we touched.
         for path, original in backups.items():
@@ -949,7 +1031,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
 
     if args.auto_mode:
-        auto_apply(project, analysis, runner, test_timeout)
+        auto_apply(
+            project, analysis, runner, test_timeout, [r.mutation for r in survived]
+        )
     else:
         print(analysis)
 
