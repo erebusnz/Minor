@@ -144,6 +144,21 @@ OPENAI_API_KEY=sk-... python morris-minor.py --project path/to/firmware --backen
 
 ---
 
+## Use it as a Claude Code skill
+
+This repo ships a [Claude Code](https://docs.claude.com/en/docs/claude-code)
+skill at [`.claude/skills/morris-minor/`](.claude/skills/morris-minor/SKILL.md).
+When you run Claude Code inside this repo it's picked up automatically, so you can
+just ask in natural language — e.g. *"find the gaps in my Unity test suite"* or
+*"run mutation testing on ../my-firmware"* — and Claude drives `morris-minor.py`
+for you, interprets the survivors, and (with your OK) writes verified tests. The
+skill references the `morris-minor.py` at the repo root, so there's nothing extra
+to install. To make it available in **every** local session, copy that folder to
+`~/.claude/skills/morris-minor/` (bundle `morris-minor.py` alongside its
+`SKILL.md` so it works from any directory).
+
+---
+
 ## How it works
 
 1. **Configure + baseline** — `cmake -S <test-dir> -B <build-dir> -G <gen>

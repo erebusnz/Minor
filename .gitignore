@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 .venv/
 *.morris-backup
+
+# Claude Code local settings (machine-specific); the skill under
+# .claude/skills/ is tracked, this file is not.
+.claude/settings.local.json
